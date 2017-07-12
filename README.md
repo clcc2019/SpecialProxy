@@ -27,12 +27,4 @@ SpecialProxy
     -w 工作进程数  
   
 ##### BUG：  
-    好像有些连接不关闭，需要定时重启代理
-  
-##### 编译:  
-~~~~~
-Linux/Android:  
-    make DEFS=-DXMEMCPY  
-Android-ndk:  
-    ndk-build  
-~~~~~
+    好像有些连接不关闭，需要定时重启代理  
