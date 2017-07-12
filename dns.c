@@ -1,7 +1,7 @@
 #include "dns.h"
 #include "http.h"
 
-struct dns dns_list[MAX_CONNECTION / 2];  //Ò»¸ö¿Í»§¶Ë + Ò»¸ö·şÎñ¶Ë Õ¼ÓÃÒ»¸ödns½á¹¹Ìå
+struct dns dns_list[MAX_CONNECTION / 2];  //ä¸€ä¸ªå®¢æˆ·ç«¯ + ä¸€ä¸ªæœåŠ¡ç«¯ å ç”¨ä¸€ä¸ªdnsç»“æ„ä½“
 int dnsFd;
 
 void read_dns_rsp()
@@ -17,10 +17,10 @@ void read_dns_rsp()
         memcpy(&dns_flag, rsp_data, 2);
         dns = dns_list + dns_flag;
         client = cts + (dns_flag << 1);
-        //ÅĞ¶ÏÊÇ·ñÊÇÕı³£DNS»ØÓ¦£¬ÊÇ·ñÒÑ¹Ø±ÕÁ¬½Ó
+        //åˆ¤æ–­æ˜¯å¦æ˜¯æ­£å¸¸DNSå›åº”ï¼Œæ˜¯å¦å·²å…³é—­è¿æ¥
         if (dns_flag > MAX_CONNECTION >> 1 || client->fd < 0)
             continue;
-        if (dns->request_len + 12 > len || (unsigned char)rsp_data[3] != 128)  //charÖ»ÓĞ7Î»¿ÉÓÃ£¬ÔòÕıÊı×î¸ßÎª127
+        if (dns->request_len + 12 > len || (unsigned char)rsp_data[3] != 128)  //charåªæœ‰7ä½å¯ç”¨ï¼Œåˆ™æ­£æ•°æœ€é«˜ä¸º127
         {
             close_connection(client);
             continue;
@@ -58,7 +58,7 @@ void read_dns_rsp()
     }
 }
 
-/* ÍêÈ«·¢ËÍ·µ»Ø0£¬·¢ËÍ²¿·Ö·µ»Ø1£¬³ö´í·µ»Ø-1 */
+/* å®Œå…¨å‘é€è¿”å›0ï¼Œå‘é€éƒ¨åˆ†è¿”å›1ï¼Œå‡ºé”™è¿”å›-1 */
 static int8_t send_dns_req(struct dns *dns)
 {
     static int write_len;
@@ -145,12 +145,12 @@ int8_t build_dns_req(struct dns *dns, char *domain)
 
 void dns_connect(struct sockaddr_in *dnsAddr)
 {
-	dnsFd = socket(AF_INET, SOCK_DGRAM, 0);
+    dnsFd = socket(AF_INET, SOCK_DGRAM, 0);
     if (dnsFd < 0)
     {
         perror("socket");
         exit(1);
     }
-	connect(dnsFd, (struct sockaddr *)dnsAddr, sizeof(struct sockaddr_in));
+    connect(dnsFd, (struct sockaddr *)dnsAddr, sizeof(struct sockaddr_in));
     fcntl(dnsFd, F_SETFL, O_NONBLOCK);
 }

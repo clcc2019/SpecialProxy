@@ -27,11 +27,11 @@ static void usage()
 
 static void server_loop()
 {
-	pthread_t thread_id;
+    pthread_t thread_id;
     int n;
 
-	//µ¥¶À½ø³Ìaccept¶à½ø³Ì²¢·¢»·¾³ÏÂ²»»á¾ªÈº
-	pthread_create(&thread_id, NULL, accept_loop, NULL);
+    //å•ç‹¬è¿›ç¨‹acceptå¤šè¿›ç¨‹å¹¶å‘ç¯å¢ƒä¸‹ä¸ä¼šæƒŠç¾¤
+    pthread_create(&thread_id, NULL, accept_loop, NULL);
     ev.events = EPOLLIN;
     ev.data.fd = dnsFd;
     epoll_ctl(efd, EPOLL_CTL_ADD, dnsFd, &ev);
@@ -39,7 +39,7 @@ static void server_loop()
     {
         n = epoll_wait(efd, evs, MAX_CONNECTION + 2, -1);
         while (n-- > 0)
-		{
+        {
             if (evs[n].data.fd == dnsFd)
             {
                 if (evs[n].events & EPOLLIN)
@@ -60,7 +60,7 @@ static void server_loop()
 
 static void initializate(int argc, char **argv)
 {
-	struct sockaddr_in dnsAddr;
+    struct sockaddr_in dnsAddr;
     char *p;
     int opt, i, workers = 1;
     
@@ -73,22 +73,22 @@ static void initializate(int argc, char **argv)
         exit(1);
     }
     dnsAddr.sin_family = addr.sin_family = AF_INET;
-	//Ä¬ÈÏdnsµØÖ·
+    //é»˜è®¤dnsåœ°å€
     dnsAddr.sin_addr.s_addr = inet_addr(DEFAULT_DNS_IP);
     dnsAddr.sin_port = htons(53);
-	dns_connect(&dnsAddr);  //Ö÷½ø³ÌÖĞµÄfd
+    dns_connect(&dnsAddr);  //ä¸»è¿›ç¨‹ä¸­çš„fd
     strict_spilce = 0;
     local_header = NULL;
     ssl_proxy = (char *)"CONNECT";
     local_header = (char *)"\nLocal:";
     proxy_header = (char *)"\nHost:";
     proxy_header_len = strlen(proxy_header);
-	local_header_len = strlen(local_header);
-	/* ¶ÁÈ¡ÃüÁîĞĞ²ÎÊı */
+    local_header_len = strlen(local_header);
+    /* è¯»å–å‘½ä»¤è¡Œå‚æ•° */
     while ((opt = getopt(argc, argv, "d:l:p:s:w:L:ah")) != -1)
     {
         switch (opt)
-		{
+        {
             case 'd':
                 p = strchr(optarg, ':');
                 if (p)
@@ -101,7 +101,7 @@ static void initializate(int argc, char **argv)
                     dnsAddr.sin_port = htons(53);
                 }
                 dnsAddr.sin_addr.s_addr = inet_addr(optarg);
-				connect(dnsFd, (struct sockaddr *)&dnsAddr, sizeof(dnsAddr));
+                connect(dnsFd, (struct sockaddr *)&dnsAddr, sizeof(dnsAddr));
             break;
             
             case 'l':
@@ -118,7 +118,7 @@ static void initializate(int argc, char **argv)
             break;
             
             case 'p':
-                //¼ÙÈçÑ¡ÏîÖµÎª "Proxy", proxy_headerÉèÖÃÎª "\nProxy:"
+                //å‡å¦‚é€‰é¡¹å€¼ä¸º "Proxy", proxy_headerè®¾ç½®ä¸º "\nProxy:"
                 proxy_header_len = strlen(optarg) + 2;
                 if (optarg[proxy_header_len] == ':')
                     optarg[proxy_header_len--] = '\0';
@@ -169,7 +169,7 @@ static void initializate(int argc, char **argv)
     memset(cts, 0, sizeof(cts));
     for (i = MAX_CONNECTION; i--; )
         cts[i].fd = -1;
-    //Îª·şÎñ¶ËµÄ½á¹¹Ìå·ÖÅäÄÚ´æ
+    //ä¸ºæœåŠ¡ç«¯çš„ç»“æ„ä½“åˆ†é…å†…å­˜
     for (i = 1; i < MAX_CONNECTION; i += 2)
     {
         cts[i].ready_data = (char *)malloc(BUFFER_SIZE);
@@ -195,9 +195,9 @@ static void initializate(int argc, char **argv)
         dns_list[i].request[11] = 0;
     }
     signal(SIGPIPE, SIG_IGN);
-	while (workers-- > 1 && fork() == 0)
-		//×Ó½ø³ÌÖĞµÄdnsFd±ØĞëÖØĞÂÉêÇë£¬²»È»epoll¼àÌı¿ÉÄÜ¶ÁÈ¡µ½ÆäËû½ø³ÌµÃµ½µÄÊı¾İ
-		dns_connect(&dnsAddr);
+    while (workers-- > 1 && fork() == 0)
+        //å­è¿›ç¨‹ä¸­çš„dnsFdå¿…é¡»é‡æ–°ç”³è¯·ï¼Œä¸ç„¶epollç›‘å¬å¯èƒ½è¯»å–åˆ°å…¶ä»–è¿›ç¨‹å¾—åˆ°çš„æ•°æ®
+        dns_connect(&dnsAddr);
 }
 
 int main(int argc, char **argv)

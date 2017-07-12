@@ -226,10 +226,10 @@ static char *build_request(char *client_data, int *data_len, char *host)
     static char *uri, *url, *p, *lf, *header, *new_data, *proxy_host;
     static int len;
 
-    del_hdr(client_data, data_len);
     header = client_data;
     proxy_host = host;
     do {
+        del_hdr(client_data, data_len);
         /* 将完整url转换为uri */
         url = strchr(header, ' ');
         lf = strchr(header, '\n');
@@ -435,7 +435,7 @@ void tcp_in(conn_t *in)
     if (in->fd < 0)
         return;
 
-	//如果in - cts是奇数，那么是服务端触发事件
+    //如果in - cts是奇数，那么是服务端触发事件
     if ((in - cts) & 1)
     {
         if (in->ready_data_len == 0)
@@ -537,28 +537,28 @@ void *accept_loop(void *ptr)
 {
     conn_t *client;
     
-	while (1)
-	{
-		/* 偶数为客户端，奇数为服务端 */
-		for (client = cts; client - cts < MAX_CONNECTION; client += 2)
-			if (client->fd < 0)
-				break;
-		if (client - cts >= MAX_CONNECTION)
-		{
-			sleep(3);
-			continue;
-		}
-		client->fd = accept(lisFd, (struct sockaddr *)&addr, &addr_len);
-		if (client->fd >= 0)
-		{
-			fcntl(client->fd, F_SETFL, fcntl(client->fd, F_GETFL)|O_NONBLOCK);
-			ev.data.ptr = client;
-			ev.events = EPOLLIN|EPOLLET;
-			epoll_ctl(efd, EPOLL_CTL_ADD, client->fd, &ev);
-		}
-	}
-	
-	return NULL;
+    while (1)
+    {
+        /* 偶数为客户端，奇数为服务端 */
+        for (client = cts; client - cts < MAX_CONNECTION; client += 2)
+            if (client->fd < 0)
+                break;
+        if (client - cts >= MAX_CONNECTION)
+        {
+            sleep(3);
+            continue;
+        }
+        client->fd = accept(lisFd, (struct sockaddr *)&addr, &addr_len);
+        if (client->fd >= 0)
+        {
+            fcntl(client->fd, F_SETFL, fcntl(client->fd, F_GETFL)|O_NONBLOCK);
+            ev.data.ptr = client;
+            ev.events = EPOLLIN|EPOLLET;
+            epoll_ctl(efd, EPOLL_CTL_ADD, client->fd, &ev);
+        }
+    }
+    
+    return NULL;
 }
 
 void create_listen(char *ip, int port)

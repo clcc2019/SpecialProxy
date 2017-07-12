@@ -4,7 +4,7 @@
 #include "main.h"
 
 struct dns {
-    char request[512];  //UDP的DNS请求不超512字节
+    char request[512];  //UDP鐨凞NS璇锋眰涓嶈秴512瀛楄妭
     uint16_t request_len, sent_len;
 };
 
