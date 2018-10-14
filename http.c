@@ -10,61 +10,18 @@ char *local_header, *proxy_header, *ssl_proxy;
 int lisFd, proxy_header_len, local_header_len;
 uint8_t strict_spilce;
 
-/*
-    有时候由于程序代码原因glibc的memcpy不能src + len > dst，调试起来比较麻烦
-    这个函数正是为了解决这样的问题，但是效率会比memcpy低
-*/
-#ifdef XMEMCPY
-typedef struct byte256 {char data[256];} byte256_t;
-typedef struct byte64 {char data[64];} byte64_t;
-typedef struct byte16 {char data[16];} byte16_t;
-static void xmemcpy(char *src, const char *dst, size_t len)
-{
-    static byte256_t *to256, *from256;
-    static byte64_t *to64, *from64;
-    static byte16_t *to16, *from16;
-
-    to256 = (byte256_t *)src;
-    from256 = (byte256_t *)dst;
-    while (len >= sizeof(byte256_t))
-    {
-        *to256++ = *from256++;
-        len -= sizeof(byte256_t);
-    }
-    to64 = (byte64_t *)to256;
-    from64 = (byte64_t *)from256;
-    while (len >= sizeof(byte64_t))
-    {
-        *to64++ = *from64++;
-        len -= sizeof(byte64_t);
-    }
-    to16 = (byte16_t *)to64;
-    from16 = (byte16_t *)from64;
-    while (len >= sizeof(byte16_t))
-    {
-        *to16++ = *from16++;
-        len -= sizeof(byte16_t);
-    }
-    src = (char *)to16;
-    dst = (char *)from16;
-    while (len--)
-        *src++ = *dst++;
-}
-#else
-#define xmemcpy memcpy
-#endif
-
 int8_t connectionToServer(char *ip, conn_t *server)
 {
     server->fd = socket(AF_INET, SOCK_STREAM, 0);
     if (server->fd < 0)
         return 1;
-    fcntl(server->fd, F_SETFL, fcntl(server->fd, F_GETFL)|O_NONBLOCK);
+    fcntl(server->fd, F_SETFL, O_NONBLOCK);
     addr.sin_addr.s_addr = inet_addr(ip);
     addr.sin_port = htons(server->destPort);
-    connect(server->fd, (struct sockaddr *)&addr, sizeof(addr));
+    if (connect(server->fd, (struct sockaddr *)&addr, sizeof(addr)) != 0 && errno != EINPROGRESS)
+        return 1;
     ev.data.ptr = server;
-    ev.events = EPOLLIN|EPOLLOUT|EPOLLET;
+    ev.events = EPOLLIN|EPOLLOUT|EPOLLERR|EPOLLHUP|EPOLLET;
     epoll_ctl(efd, EPOLL_CTL_ADD, server->fd, &ev);
 
     return 0;
@@ -76,7 +33,7 @@ void close_connection(conn_t *conn)
     close(conn->fd);
     if ((conn - cts) & 1)
     {
-        static char *server_data;
+        char *server_data;
 
         server_data = conn->ready_data;
         memset(conn, 0, sizeof(conn_t));
@@ -85,7 +42,7 @@ void close_connection(conn_t *conn)
     }
     else
     {
-        static struct dns *d;
+        struct dns *d;
 
         d =  dns_list + ((conn - cts) >> 1);
         d->request_len = d->sent_len = 0;
@@ -122,8 +79,8 @@ static int8_t request_type(char *data)
 
 static char *read_data(conn_t *in, char *data, int *data_len)
 {
-    static char *new_data;
-    static int read_len;
+    char *new_data;
+    int read_len;
 
     do {
         new_data = (char *)realloc(data, *data_len + BUFFER_SIZE + 1);
@@ -153,12 +110,12 @@ static char *read_data(conn_t *in, char *data, int *data_len)
 
 static char *get_host(char *data)
 {
-    static char *hostEnd, *host;
+    char *hostEnd, *host;
 
     host = strstr(data, local_header);
     if (host != NULL)
     {
-        static char *local_host;
+        char *local_host;
         
         host += local_header_len;
         while (*host == ' ')
@@ -171,9 +128,8 @@ static char *get_host(char *data)
         if (local_host == NULL)
             return NULL;
         strcpy(local_host, "127.0.0.1:");
-        strncpy(local_host + 10, host, hostEnd - host);
+        memcpy(local_host + 10, host, hostEnd - host);
         local_host[10 + (hostEnd - host)] = '\0';
-        puts(local_host);
         return local_host;
     }
     host= strstr(data, proxy_header);
@@ -192,8 +148,8 @@ static char *get_host(char *data)
 /* 删除请求头中的头域 */
 static void del_hdr(char *header, int *header_len)
 {
-    static char *key_end, *line_begin, *line_end;
-    static int key_len;
+    char *key_end, *line_begin, *line_end;
+    int key_len;
 
     for (line_begin = strchr(header, '\n'); line_begin++ && *line_begin != '\r'; line_begin = line_end)
     {
@@ -206,7 +162,7 @@ static void del_hdr(char *header, int *header_len)
         {
             if (line_end++)
             {
-                xmemcpy(line_begin, line_end, *header_len - (line_end - header) + 1);
+                memmove(line_begin, line_end, *header_len - (line_end - header) + 1);
                 (*header_len) -= line_end - line_begin;
                 line_end = line_begin - 1;  //新行前一个字符
             }
@@ -223,8 +179,8 @@ static void del_hdr(char *header, int *header_len)
 /* 构建新请求头 */
 static char *build_request(char *client_data, int *data_len, char *host)
 {
-    static char *uri, *url, *p, *lf, *header, *new_data, *proxy_host;
-    static int len;
+    char *uri, *url, *p, *lf, *header, *new_data, *proxy_host;
+    int len;
 
     header = client_data;
     proxy_host = host;
@@ -241,14 +197,14 @@ static char *build_request(char *client_data, int *data_len, char *host)
             p = lf - 10;  //指向HTTP版本前面的空格
             if (uri != NULL && uri < p)
             {
-                xmemcpy(url, uri, *data_len - (uri - client_data) + 1);
+                memmove(url, uri, *data_len - (uri - client_data) + 1);
                 *data_len -= uri - url;
                 lf -= uri - url;
             }
             else
             {
                 *url++ = '/';
-                xmemcpy(url, p, *data_len - (p - client_data) + 1);
+                memmove(url, p, *data_len - (p - client_data) + 1);
                 *data_len -= p - url;
                 lf -= p - url;
             }
@@ -294,7 +250,7 @@ static char *build_request(char *client_data, int *data_len, char *host)
 /* 解析Host */
 int8_t parse_host(conn_t *server, char *host)
 {
-    static char *port, *p;
+    char *port, *p;
 
     port = strchr(host, ':');
     if (port)
@@ -323,7 +279,7 @@ static int8_t copy_data(conn_t *ct)
 {
     if (ct->ready_data)
     {
-        static char *new_data;
+        char *new_data;
         
         new_data = (char *)realloc(ct->ready_data, ct->ready_data_len + ct->incomplete_data_len);
         if (new_data == NULL)
@@ -344,11 +300,31 @@ static int8_t copy_data(conn_t *ct)
     return 0;
 }
 
+/* 判断请求是否为长连接 */
+static int is_keepAlive(char *header)
+{
+    char *ConnectionValue;
+    
+    ConnectionValue = strstr(header, "\nConnection: ");
+    if (ConnectionValue)
+    {
+        ConnectionValue += 13;
+        if (*ConnectionValue == 'C' || *ConnectionValue == 'c')
+            return 0;
+        else
+            return 1;
+    }
+    if (strstr(header, "HTTP/1.1"))
+        return 1;
+    return 0;
+}
+
 static void serverToClient(conn_t *server)
 {
-    static conn_t *client;
-    static int write_len;
+    conn_t *client;
+    int write_len;
 
+    errno = 0;
     client = server - 1;
     while ((server->ready_data_len = read(server->fd, server->ready_data, BUFFER_SIZE)) > 0)
     {
@@ -364,14 +340,23 @@ static void serverToClient(conn_t *server)
         else if (write_len < server->ready_data_len)
         {
             server->sent_len = write_len;
-            ev.events = EPOLLIN|EPOLLOUT|EPOLLET;
+            ev.events = EPOLLIN|EPOLLOUT|EPOLLERR|EPOLLHUP|EPOLLET;
             ev.data.ptr = client;
             epoll_ctl(efd, EPOLL_CTL_MOD, client->fd, &ev);
             return;
         }
+        /* 判断服务端是否close */
+        if (client->request_type == HTTP_TYPE && client->is_ssl == 0)
+        {
+            server->ready_data[server->ready_data_len] = '\0';
+            if (strncmp(server->ready_data, "HTTP/1.", 7) == 0)
+                client->keep_alive = server->keep_alive = is_keepAlive(server->ready_data);
+        }
+        if (server->ready_data_len < BUFFER_SIZE)
+            break;
     }
-    //判断服务端是否关闭连接
-    if (server->ready_data_len == 0 || errno != EAGAIN)
+    //判断是否关闭连接
+    if (server->ready_data_len == 0 || (errno != EAGAIN && errno != 0) || client->keep_alive == 0)
         close_connection(server);
     else
         server->ready_data_len = server->sent_len = 0;
@@ -379,8 +364,8 @@ static void serverToClient(conn_t *server)
 
 void tcp_out(conn_t *to)
 {
-    static conn_t *from;
-    static int write_len;
+    conn_t *from;
+    int write_len;
 
     if (to->fd == -1)
         return;
@@ -397,15 +382,14 @@ void tcp_out(conn_t *to)
             serverToClient(from);
             if (from->fd >= 0 && from->ready_data_len == 0)
             {
-                ev.events = EPOLLIN|EPOLLET;
+                ev.events = EPOLLIN|EPOLLERR|EPOLLHUP|EPOLLET;
                 ev.data.ptr = to;
                 epoll_ctl(efd, EPOLL_CTL_MOD, to->fd, &ev);
             }
-            return;
         }
         else
         {
-            ev.events = EPOLLIN|EPOLLET;
+            ev.events = EPOLLIN|EPOLLERR|EPOLLHUP|EPOLLET;
             ev.data.ptr = to;
             epoll_ctl(efd, EPOLL_CTL_MOD, to->fd, &ev);
             free(from->ready_data);
@@ -416,7 +400,7 @@ void tcp_out(conn_t *to)
     else if (write_len > 0)
     {
         from->sent_len += write_len;
-        ev.events = EPOLLIN|EPOLLOUT|EPOLLET;
+        ev.events = EPOLLIN|EPOLLOUT|EPOLLERR|EPOLLHUP|EPOLLET;
         ev.data.ptr = to;
         epoll_ctl(efd, EPOLL_CTL_MOD, to->fd, &ev);
     }
@@ -428,13 +412,11 @@ void tcp_out(conn_t *to)
 
 void tcp_in(conn_t *in)
 {
-    static int write_len;
-    static conn_t *server;
-    static char *host, *headerEnd;
+    conn_t *server;
+    char *host, *headerEnd;
     
     if (in->fd < 0)
         return;
-
     //如果in - cts是奇数，那么是服务端触发事件
     if ((in - cts) & 1)
     {
@@ -450,7 +432,8 @@ void tcp_in(conn_t *in)
         return;
     }
     server = in + 1;
-    if (request_type(in->incomplete_data) == OTHER_TYPE)
+    server->request_type = in->request_type = request_type(in->incomplete_data);
+    if (in->request_type == OTHER_TYPE)
     {
         //如果是第一次读取数据，并且不是HTTP请求的，关闭连接。复制数据失败的也关闭连接
         if (in->reread_data == 0 || copy_data(in) != 0)
@@ -470,6 +453,8 @@ void tcp_in(conn_t *in)
         close_connection(in);
         return;
     }
+    /* 判断是否长连接 */
+    server->keep_alive = in->keep_alive = is_keepAlive(in->incomplete_data);
     /* 第一次读取数据 */
     if (in->reread_data == 0)
     {
@@ -482,16 +467,10 @@ void tcp_in(conn_t *in)
         }
         if (strstr(in->incomplete_data, ssl_proxy))
         {
-            write_len = write(in->fd, SSL_RSP, 39);
-            if (write_len == 39)
-            {
-                ;
-            }
-            else if (write_len > 0)
-            {
-                memcpy(server->ready_data, SSL_RSP + write_len, 39 - write_len);
-            }
-            else
+            server->keep_alive = in->keep_alive = 1;
+            server->is_ssl = in->is_ssl = 1;
+            /* 这时候即使fd是非阻塞也只需要判断返回值是否小于0 */
+            if (write(in->fd, SSL_RSP, 39) < 0)
             {
                 free(host);
                 close_connection(in);
@@ -501,7 +480,7 @@ void tcp_in(conn_t *in)
             if (headerEnd - in->incomplete_data < in->incomplete_data_len)
             {
                 in->incomplete_data_len -= headerEnd - in->incomplete_data;
-                xmemcpy(in->incomplete_data, headerEnd, in->incomplete_data_len + 1);
+                memmove(in->incomplete_data, headerEnd, in->incomplete_data_len + 1);
                 if (request_type(in->incomplete_data) == OTHER_TYPE)
                 {
                     copy_data(in);
@@ -528,15 +507,17 @@ void tcp_in(conn_t *in)
     }
     //数据处理完毕，可以发送
     handle_data_complete:
-    //多次读取客户端数据，但是和服务端建立连接
+    //这个判断是防止 多次读取客户端数据，但是没有和服务端建立连接，导致报错
     if (server->fd >= 0)
         tcp_out(server);
 }
 
 void *accept_loop(void *ptr)
 {
+    struct epoll_event epollEvent;
     conn_t *client;
     
+    epollEvent.events = EPOLLIN|EPOLLET;
     while (1)
     {
         /* 偶数为客户端，奇数为服务端 */
@@ -548,14 +529,10 @@ void *accept_loop(void *ptr)
             sleep(3);
             continue;
         }
-        client->fd = accept(lisFd, (struct sockaddr *)&addr, &addr_len);
-        if (client->fd >= 0)
-        {
-            fcntl(client->fd, F_SETFL, fcntl(client->fd, F_GETFL)|O_NONBLOCK);
-            ev.data.ptr = client;
-            ev.events = EPOLLIN|EPOLLET;
-            epoll_ctl(efd, EPOLL_CTL_ADD, client->fd, &ev);
-        }
+        while ((client->fd = accept(lisFd, (struct sockaddr *)&addr, &addr_len)) < 0);
+        fcntl(client->fd, F_SETFL, O_NONBLOCK);
+        epollEvent.data.ptr = client;
+        epoll_ctl(efd, EPOLL_CTL_ADD, client->fd, &epollEvent);
     }
     
     return NULL;

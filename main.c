@@ -6,7 +6,7 @@
 #define VERSION "0.1"
 #define DEFAULT_DNS_IP "114.114.114.114"
 
-struct epoll_event evs[MAX_CONNECTION + 2], ev;
+struct epoll_event evs[MAX_CONNECTION + 1], ev;
 struct sockaddr_in addr;
 socklen_t addr_len;
 int efd;
@@ -37,7 +37,7 @@ static void server_loop()
     epoll_ctl(efd, EPOLL_CTL_ADD, dnsFd, &ev);
     while (1)
     {
-        n = epoll_wait(efd, evs, MAX_CONNECTION + 2, -1);
+        n = epoll_wait(efd, evs, MAX_CONNECTION + 1, -1);
         while (n-- > 0)
         {
             if (evs[n].data.fd == dnsFd)
@@ -49,6 +49,11 @@ static void server_loop()
             }
             else
             {
+				if ((evs[n].events & EPOLLERR) || (evs[n].events & EPOLLHUP))
+				{
+					if (((conn_t *)evs[n].data.ptr)->fd >= 0)
+						close_connection((conn_t *)evs[n].data.ptr);
+				}
                 if (evs[n].events & EPOLLIN)
                     tcp_in((conn_t *)evs[n].data.ptr);
                 if (evs[n].events & EPOLLOUT)
@@ -66,12 +71,6 @@ static void initializate(int argc, char **argv)
     
     addr_len = sizeof(addr);
     lisFd = -1;
-    efd = epoll_create(MAX_CONNECTION + 2);
-    if (efd < 0)
-    {
-        perror("epoll_create");
-        exit(1);
-    }
     dnsAddr.sin_family = addr.sin_family = AF_INET;
     //默认dns地址
     dnsAddr.sin_addr.s_addr = inet_addr(DEFAULT_DNS_IP);
@@ -95,10 +94,6 @@ static void initializate(int argc, char **argv)
                 {
                     *p = '\0';
                     dnsAddr.sin_port = htons(atoi(p+1));
-                }
-                else
-                {
-                    dnsAddr.sin_port = htons(53);
                 }
                 dnsAddr.sin_addr.s_addr = inet_addr(optarg);
                 connect(dnsFd, (struct sockaddr *)&dnsAddr, sizeof(dnsAddr));
@@ -198,13 +193,20 @@ static void initializate(int argc, char **argv)
     while (workers-- > 1 && fork() == 0)
         //子进程中的dnsFd必须重新申请，不然epoll监听可能读取到其他进程得到的数据
         dns_connect(&dnsAddr);
+    efd = epoll_create(MAX_CONNECTION + 1);
+    if (efd < 0)
+    {
+        perror("epoll_create");
+        exit(1);
+    }
+
 }
 
 int main(int argc, char **argv)
 {
     initializate(argc, argv);
-    //if (daemon(1, 1))
-    if (daemon(1, 0))
+    if (daemon(1, 1))
+    //if (daemon(1, 0))
     {
         perror("daemon");
         return 1;

@@ -19,7 +19,7 @@
 #define BUFFER_SIZE 10240
 #define MAX_CONNECTION 1020
 
-extern struct epoll_event evs[MAX_CONNECTION + 2], ev;
+extern struct epoll_event evs[MAX_CONNECTION + 1], ev;
 extern struct sockaddr_in addr;
 extern socklen_t addr_len;
 extern int efd;

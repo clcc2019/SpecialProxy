@@ -6,13 +6,13 @@ int dnsFd;
 
 void read_dns_rsp()
 {
-    static char rsp_data[512], *p, ips[16];
-    static unsigned char *_p;
-    static struct dns *dns;
-    static conn_t *client;
-    static int16_t len, dns_flag;
+    char rsp_data[512], *p, ip[16];
+    unsigned char *_p;
+    struct dns *dns;
+    conn_t *client;
+    int16_t len, dns_flag;
 
-    while ((len = read(dnsFd, rsp_data, BUFFER_SIZE)) > 11)
+    while ((len = read(dnsFd, rsp_data, 512)) > 11)
     {
         memcpy(&dns_flag, rsp_data, 2);
         dns = dns_list + dns_flag;
@@ -26,9 +26,9 @@ void read_dns_rsp()
             continue;
         }
         
-        /* get ips */
+        /* get domain ip */
         p = rsp_data + dns->request_len + 11;
-        ips[0] = '\0';
+        ip[0] = 0;
         while (p - rsp_data + 4 <= len)
         {
             //type
@@ -38,13 +38,12 @@ void read_dns_rsp()
                 continue;
             }
             _p = (unsigned char *)p + 1;
-            sprintf(ips, "%d.%d.%d.%d", _p[0], _p[1], _p[2], _p[3]);
+            sprintf(ip, "%d.%d.%d.%d", _p[0], _p[1], _p[2], _p[3]);
             break;
         }
-        if (ips[0])
+        if (ip[0])
         {
-            //printf("ips %s\n", ips);
-            if (connectionToServer(ips, client + 1) != 0)
+            if (connectionToServer(ip, client + 1) != 0)
             {
                 close_connection(client);
                 continue;
@@ -61,7 +60,7 @@ void read_dns_rsp()
 /* 完全发送返回0，发送部分返回1，出错返回-1 */
 static int8_t send_dns_req(struct dns *dns)
 {
-    static int write_len;
+    int write_len;
     
     write_len = write(dnsFd, dns->request + dns->sent_len, dns->request_len - dns->sent_len);
     if (write_len == dns->request_len - dns->sent_len)
@@ -82,7 +81,7 @@ static int8_t send_dns_req(struct dns *dns)
 
 void dns_query()
 {
-    static int16_t i, ret;
+    int16_t i, ret;
     
     for (i = 0; i < MAX_CONNECTION >> 1; i++)
     {
@@ -95,18 +94,19 @@ void dns_query()
                 close_connection(cts + (i << 1));
         }
     }
-    if (i == MAX_CONNECTION >> 1)
-        ev.events = EPOLLIN|EPOLLET;
-    else
+    //dnsFd的缓冲区以满
+    if (i < MAX_CONNECTION >> 1)
+    {
         ev.events = EPOLLIN|EPOLLOUT|EPOLLET;
-    ev.data.fd = dnsFd;
-    epoll_ctl(efd, EPOLL_CTL_MOD, dnsFd, &ev);
+        ev.data.fd = dnsFd;
+        epoll_ctl(efd, EPOLL_CTL_MOD, dnsFd, &ev);
+    }
 }
 
 int8_t build_dns_req(struct dns *dns, char *domain)
 {
-    static char *p, *_p;
-    static int8_t domain_size;
+    char *p, *_p;
+    int8_t domain_size;
 
     domain_size = strlen(domain);
     p = dns->request + 12;
@@ -128,8 +128,6 @@ int8_t build_dns_req(struct dns *dns, char *domain)
     {
         case 0:
             ev.data.fd = dnsFd;
-            ev.events = EPOLLIN|EPOLLET;
-            epoll_ctl(efd, EPOLL_CTL_MOD, dnsFd, &ev);
         return 0;
         
         case 1:

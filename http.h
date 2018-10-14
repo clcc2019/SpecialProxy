@@ -8,6 +8,9 @@ typedef struct tcp_connection {
     int fd, ready_data_len, incomplete_data_len, sent_len;
     uint16_t destPort;
     unsigned reread_data :1;
+    unsigned request_type :1;
+    unsigned keep_alive :1;
+	unsigned is_ssl :1;
 } conn_t;
 
 extern void create_listen(char *ip, int port);
