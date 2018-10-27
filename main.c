@@ -3,7 +3,7 @@
 #include "dns.h"
 #include <pthread.h>
 
-#define VERSION "0.1"
+#define VERSION "0.2"
 #define DEFAULT_DNS_IP "114.114.114.114"
 
 struct epoll_event evs[MAX_CONNECTION + 1], ev;
@@ -49,11 +49,11 @@ static void server_loop()
             }
             else
             {
-				if ((evs[n].events & EPOLLERR) || (evs[n].events & EPOLLHUP))
-				{
-					if (((conn_t *)evs[n].data.ptr)->fd >= 0)
-						close_connection((conn_t *)evs[n].data.ptr);
-				}
+                if ((evs[n].events & EPOLLERR) || (evs[n].events & EPOLLHUP))
+                {
+                    if (((conn_t *)evs[n].data.ptr)->fd >= 0)
+                        close_connection((conn_t *)evs[n].data.ptr);
+                }
                 if (evs[n].events & EPOLLIN)
                     tcp_in((conn_t *)evs[n].data.ptr);
                 if (evs[n].events & EPOLLOUT)
@@ -67,10 +67,12 @@ static void initializate(int argc, char **argv)
 {
     struct sockaddr_in dnsAddr;
     char *p;
-    int opt, i, workers = 1;
+    int opt, i, workers;
     
+	/* 初始化部分变量值 */
     addr_len = sizeof(addr);
     lisFd = -1;
+    workers = 1;
     dnsAddr.sin_family = addr.sin_family = AF_INET;
     //默认dns地址
     dnsAddr.sin_addr.s_addr = inet_addr(DEFAULT_DNS_IP);
@@ -83,8 +85,8 @@ static void initializate(int argc, char **argv)
     proxy_header = (char *)"\nHost:";
     proxy_header_len = strlen(proxy_header);
     local_header_len = strlen(local_header);
-    /* 读取命令行参数 */
-    while ((opt = getopt(argc, argv, "d:l:p:s:w:L:ah")) != -1)
+    /* 处理命令行参数 */
+    while ((opt = getopt(argc, argv, "d:l:p:s:w:u:L:ah")) != -1)
     {
         switch (opt)
         {
@@ -151,11 +153,25 @@ static void initializate(int argc, char **argv)
                 workers = atoi(optarg);
             break;
             
+            case 'u':
+                if (setgid(atoi(optarg)) != 0))
+                {
+                    perror("setgid");
+                    exit(1);
+                }
+                if (setuid(atoi(optarg)) != 0))
+                {
+                    perror("setuid");
+                    exit(1);
+                }
+            break;
+            
             default:
                 usage();
             break;
         }
     }
+	/* 初始化剩下的变量值 */
     if (lisFd < 0)
     {
         fputs("no listen address\n", stderr);
@@ -174,6 +190,7 @@ static void initializate(int argc, char **argv)
             exit(1);
         }
     }
+	//设置dns请求头首部
     memset(dns_list, 0, sizeof(dns_list));
     for (i = MAX_CONNECTION / 2; i--; )
     {
@@ -189,9 +206,9 @@ static void initializate(int argc, char **argv)
         dns_list[i].request[10] = 0;
         dns_list[i].request[11] = 0;
     }
-    signal(SIGPIPE, SIG_IGN);
+    signal(SIGPIPE, SIG_IGN);  //忽略PIPE信号
+    //子进程中的dnsFd必须重新申请，不然epoll监听可能读取到其他进程得到的数据
     while (workers-- > 1 && fork() == 0)
-        //子进程中的dnsFd必须重新申请，不然epoll监听可能读取到其他进程得到的数据
         dns_connect(&dnsAddr);
     efd = epoll_create(MAX_CONNECTION + 1);
     if (efd < 0)
@@ -205,8 +222,7 @@ static void initializate(int argc, char **argv)
 int main(int argc, char **argv)
 {
     initializate(argc, argv);
-    if (daemon(1, 1))
-    //if (daemon(1, 0))
+    if (daemon(1, 0))
     {
         perror("daemon");
         return 1;
