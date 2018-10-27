@@ -22,6 +22,7 @@ SpecialProxy
     -L 本地代理头域         默认为 "Local"  
     -d DNS查询IP[:端口]     默认为 "114.114.114.114"  
     -s SSL代理字符串        默认为 "CONNECT"  
+    -u                      设置运行uid  
     -a                      对所有HTTP请求重新拼接  
     -h 显示帮助  
     -w 工作进程数  

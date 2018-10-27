@@ -19,6 +19,7 @@ static void usage()
     "    -L local proxy header                 \033[35G default is 'Local'\n"
     "    -d dns query address                  \033[35G default is " DEFAULT_DNS_IP "\n"
     "    -s ssl proxy string                   \033[35G default is 'CONNECT'\n"
+    "    -u uid                   \033[35G running uid\n"
     "    -a                                    \033[35G all http requests repeat spilce\n"
     "    -h display this infomaction\n"
     "    -w worker process\n");
