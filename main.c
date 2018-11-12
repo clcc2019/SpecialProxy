@@ -155,12 +155,12 @@ static void initializate(int argc, char **argv)
             break;
             
             case 'u':
-                if (setgid(atoi(optarg)) != 0))
+                if (setgid(atoi(optarg)) != 0)
                 {
                     perror("setgid");
                     exit(1);
                 }
-                if (setuid(atoi(optarg)) != 0))
+                if (setuid(atoi(optarg)) != 0)
                 {
                     perror("setuid");
                     exit(1);
