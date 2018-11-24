@@ -487,6 +487,16 @@ void tcp_in(conn_t *in)
                     free(host);
                     return;
                 }
+                else
+                {
+                    //如果是CONNECT代理HTTP,需要重新获取host
+                    char *save_host;
+                    host = get_host(in->incomplete_data)
+                    if (!host)
+                        host = save_host;
+                    else
+                        free(save_host);
+                }
             }
             else
             {
