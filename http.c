@@ -487,16 +487,6 @@ void tcp_in(conn_t *in)
                     free(host);
                     return;
                 }
-                else
-                {
-                    //如果是CONNECT代理HTTP  需要再次获取host
-                    char *host_save = host;
-                    host = get_host(in->incomplete_data);
-                    if (host)
-                        free(host_save);
-                    else
-                        host = host_save;
-                }
             }
             else
             {
@@ -575,7 +565,6 @@ void create_listen(char *ip, int port)
         exit(1);
     }
 }
-
 
 
 
