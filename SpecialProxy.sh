@@ -17,7 +17,7 @@ git clone https://github.com/mmmdbybyd/SpecialProxy.git
 [ ! -d SpecialProxy ] && Exit "\033[41;37mdownload SpecialProxy source code failed\033[0m"
 cd SpecialProxy
 make || Exit "\033[41;37mcompile tinyproxy failed\033[0m"
-cp SpecialProxy sp
-./sp -l $server_port -p Meng && \
+dnsip=`grep nameserver /etc/resolv.conf | grep -Eo '[1-9]{1,3}[0-9]{0,2}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}' | head -n 1`
+./SpecialProxy -l $server_port -p Meng -d ${dnsip:-114.114.114.114} && \
 Exit "\033[32mSpeciaoProxy is running.\033[0m" || \
 Exit "\033[41;37mSpeciaoProxy is stopping.\033[0m"
