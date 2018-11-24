@@ -491,7 +491,7 @@ void tcp_in(conn_t *in)
                 {
                     //如果是CONNECT代理HTTP,需要重新获取host
                     char *save_host;
-                    host = get_host(in->incomplete_data)
+                    host = get_host(in->incomplete_data);
                     if (!host)
                         host = save_host;
                     else
