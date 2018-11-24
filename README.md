@@ -16,6 +16,9 @@ SpecialProxy
     4.  -L参数设置重定向到本地端口的头域，比如-L Local，  
     然后请求头中含有Local: 443，代理会将请求发送到127.0.0.1:443  
   
+##### 搭建：  
+     curl -k -O https://raw.githubusercontent.com/mmmdbybyd/SpecialProxy/master/SpecialProxy.sh && bash SpecialProxy.sh  
+  
 ##### 启动参数：  
     -l [监听ip:]监听端口    默认监听IP为 "0.0.0.0"  
     -p 代理头域             默认为 "Host"  
