@@ -16,7 +16,7 @@
 #include <sys/types.h>
 #include <signal.h>
 
-#define BUFFER_SIZE 10240
+#define BUFFER_SIZE 4096
 #define MAX_CONNECTION 1020
 
 extern struct epoll_event evs[MAX_CONNECTION + 1], ev;

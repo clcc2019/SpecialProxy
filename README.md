@@ -1,6 +1,6 @@
 SpecialProxy  
 ======  
-用epoll多路复用io写的一个HTTP代理，自带DNS解析  
+用epoll多路复用io写的一个HTTP代理，轻快，自带DNS解析  
   
 ##### SpecialProxy有如下特性：  
     1.  普通HTTP代理通过请求头首行的host或者Host头域字段获得目标主机，  
@@ -16,8 +16,9 @@ SpecialProxy
     4.  -L参数设置重定向到本地端口的头域，比如-L Local，  
     然后请求头中含有Local: 443，代理会将请求发送到127.0.0.1:443  
   
-##### 搭建：  
-     curl -k -O https://raw.githubusercontent.com/mmmdbybyd/SpecialProxy/master/SpecialProxy.sh && bash SpecialProxy.sh  
+    5. -e设置数据编码的代码，
+    对客户端uri Host Referer以及请求附带的数据编码，
+    服务器的返回数据也编码
   
 ##### 启动参数：  
     -l [监听ip:]监听端口    默认监听IP为 "0.0.0.0"  
@@ -25,13 +26,14 @@ SpecialProxy
     -L 本地代理头域         默认为 "Local"  
     -d DNS查询IP[:端口]     默认为 "114.114.114.114"  
     -s SSL代理字符串        默认为 "CONNECT"  
-    -u                      设置运行uid  
+    -u 设置uid
+    -e 设置代理CProxy的数据编码代码(1-127)
     -a                      对所有HTTP请求重新拼接  
     -h 显示帮助  
     -w 工作进程数  
   
 ##### BUG：  
-    好像有些连接不关闭，需要定时重启代理
+    待发现
   
 ##### 编译:  
 ~~~~~
