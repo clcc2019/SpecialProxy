@@ -8,7 +8,7 @@ ifeq ($(ANDROID_DATA),/data)
 endif
 
 
-all : main.o http.o dns.o
+all : main.o http.o dns.o timeout.o
 	$(CC) $(CFLAGS) $(DEFS) -o $(OBJ) $^
 	strip $(OBJ)
 	-chmod 777 $(OBJ) 2>&-

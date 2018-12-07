@@ -3,6 +3,8 @@
 
 #include "main.h"
 
+#define DEFAULT_DNS_IP "114.114.114.114"
+
 struct dns {
     char request[512];  //UDP的DNS请求不超512字节
     uint16_t request_len, sent_len;

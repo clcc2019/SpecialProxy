@@ -1,5 +1,6 @@
 #include "main.h"
 #include "http.h"
+#include "timeout.h"
 #include "dns.h"
 #include <pthread.h>
 
@@ -19,8 +20,8 @@ static void usage()
     "    -L local proxy header                 \033[35G default is 'Local'\n"
     "    -d dns query address                  \033[35G default is " DEFAULT_DNS_IP "\n"
     "    -s ssl proxy string                   \033[35G default is 'CONNECT'\n"
-    "    -u uid                                \033[35G running uid\n"
-    "    -e                                    \033[35G set encode data code(1-127)\n"
+    "    -t timeout                                  \033[35G default is 35s\n"
+    "    -u uid                   \033[35G running uid\n"
     "    -a                                    \033[35G all http requests repeat spilce\n"
     "    -h display this infomaction\n"
     "    -w worker process\n");
@@ -80,7 +81,7 @@ static void initializate(int argc, char **argv)
     dnsAddr.sin_addr.s_addr = inet_addr(DEFAULT_DNS_IP);
     dnsAddr.sin_port = htons(53);
     dns_connect(&dnsAddr);  //主进程中的fd
-    strict_spilce = encodeCode = 0;
+    strict_spilce = timeout_seconds = 0;
     local_header = NULL;
     ssl_proxy = (char *)"CONNECT";
     local_header = (char *)"\nLocal:";
@@ -88,7 +89,7 @@ static void initializate(int argc, char **argv)
     proxy_header_len = strlen(proxy_header);
     local_header_len = strlen(local_header);
     /* 处理命令行参数 */
-    while ((opt = getopt(argc, argv, "d:l:e:p:s:w:u:L:ah")) != -1)
+    while ((opt = getopt(argc, argv, "d:l:p:s:w:t:u:L:ah")) != -1)
     {
         switch (opt)
         {
@@ -114,10 +115,6 @@ static void initializate(int argc, char **argv)
                 {
                     create_listen((char *)"0.0.0.0", atoi(optarg));
                 }
-            break;
-            
-            case 'e':
-                encodeCode = (int8_t)atoi(optarg);
             break;
             
             case 'p':
@@ -153,6 +150,10 @@ static void initializate(int argc, char **argv)
             
             case 'a':
                 strict_spilce = 1;
+            break;
+            
+            case 't':
+                timeout_seconds = (unsigned int)atoi(optarg);
             break;
             
             case 'w':
@@ -228,7 +229,7 @@ static void initializate(int argc, char **argv)
 int main(int argc, char **argv)
 {
     initializate(argc, argv);
-    if (daemon(1, 0))
+    if (daemon(1, 1))
     {
         perror("daemon");
         return 1;

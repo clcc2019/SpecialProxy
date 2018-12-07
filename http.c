@@ -1,21 +1,15 @@
 #include "http.h"
 #include "dns.h"
+#include "timeout.h"
 
+#define SSL_RSP "HTTP/1.1 200 Connection established\r\n\r\n"
 #define HTTP_TYPE 0
 #define OTHER_TYPE 1
 
 conn_t cts[MAX_CONNECTION];
-static char ssl_rsp[] = "HTTP/1.1 200 Connection established\r\n\r\n";
 char *local_header, *proxy_header, *ssl_proxy;
 int lisFd, proxy_header_len, local_header_len;
-uint8_t strict_spilce, encodeCode;
-
-/* 对数据进行编码 */
-static void dataEncode(char *data, int data_len)
-{
-    while (data_len-- > 0)
-        data[data_len] ^= encodeCode;
-}
+uint8_t strict_spilce;
 
 int8_t connectionToServer(char *ip, conn_t *server)
 {
@@ -146,19 +140,10 @@ static char *get_host(char *data)
     while (*host == ' ')
         host++;
     hostEnd = strchr(host, '\r');
-    
     if (hostEnd)
-    {
-        if (encodeCode)
-            dataEncode(host, hostEnd - host);
         return strndup(host, hostEnd - host);
-    }
     else
-    {
-        if (encodeCode)
-            dataEncode(host, strlen(host));
         return strdup(host);
-    }
 }
 
 /* 删除请求头中的头域 */
@@ -192,24 +177,6 @@ static void del_hdr(char *header, int *header_len)
     }
 }
 
-/* 对请求头中的Referer头域进行编码 */
-static void encodeReferer(char *request)
-{
-    char *referer_key, *referer_value, *line, *pr;
-    
-    for (line = strchr(request, '\n'); (referer_key = strstr(line, "\nReferer:")) != NULL || (referer_key = strstr(line, "\nreferer:")) != NULL; line = pr + 1)
-    {
-        referer_value = referer_key + sizeof("\nReferer:") - 1;
-        while (*referer_value == ' ')
-            referer_value++;
-        pr = strchr(referer_value, '\r');
-        if (pr)
-            dataEncode(referer_value, pr - referer_value);
-        else
-            dataEncode(referer_value, strlen(referer_value));
-    }
-}
-
 /* 构建新请求头 */
 static char *build_request(char *client_data, int *data_len, char *host)
 {
@@ -225,7 +192,6 @@ static char *build_request(char *client_data, int *data_len, char *host)
         lf = strchr(header, '\n');
         if (url == NULL || lf == NULL || lf - 10 <= header)
             return client_data;
-
         if (url < lf && *(++url) != '/')
         {
             uri = strchr(url + 7, '/');
@@ -243,12 +209,6 @@ static char *build_request(char *client_data, int *data_len, char *host)
                 *data_len -= p - url;
                 lf -= p - url;
             }
-            if (encodeCode)
-                dataEncode(url + 1, lf - 10 - (url + 1));
-        }
-        else if (url < lf && encodeCode)
-        {
-            dataEncode(url + 1, lf - 10 - (url + 1));
         }
 
         *data_len += strlen(proxy_host) + 8;  //8为 "Host: " + "\r\n"的长度
@@ -273,8 +233,6 @@ static char *build_request(char *client_data, int *data_len, char *host)
         free(client_data);
         if (proxy_host != host)
             free(proxy_host);
-        if (encodeCode)
-            encodeReferer(new_data);
         if (strict_spilce == 0)
             return new_data;
         client_data = new_data;
@@ -352,8 +310,6 @@ static void serverToClient(conn_t *server)
     client = server - 1;
     while ((server->ready_data_len = read(server->fd, server->ready_data, BUFFER_SIZE)) > 0)
     {
-        if (encodeCode)  //对服务端的数据编码
-            dataEncode(server->ready_data, server->ready_data_len);
         write_len = write(client->fd, server->ready_data, server->ready_data_len);
         if (write_len == -1)
         {
@@ -392,6 +348,7 @@ void tcp_out(conn_t *to)
         from = to - 1;
     else
         from = to + 1;
+    from->last_event_time = to->last_event_time = time(NULL);
     write_len = write(to->fd, from->ready_data + from->sent_len, from->ready_data_len - from->sent_len);
     if (write_len == from->ready_data_len - from->sent_len)
     {
@@ -439,11 +396,13 @@ void tcp_in(conn_t *in)
     //如果in - cts是奇数，那么是服务端触发事件
     if ((in - cts) & 1)
     {
+        in->last_event_time = (in-1)->last_event_time = time(NULL);
         if (in->ready_data_len == 0)
             serverToClient(in);
         return;
     }
-
+    
+    in->last_event_time = (in+1)->last_event_time = time(NULL);
     in->incomplete_data = read_data(in, in->incomplete_data, &in->incomplete_data_len);
     if (in->incomplete_data == NULL)
     {
@@ -454,8 +413,6 @@ void tcp_in(conn_t *in)
     server->request_type = in->request_type = request_type(in->incomplete_data);
     if (in->request_type == OTHER_TYPE)
     {
-        if (encodeCode)
-            dataEncode(in->incomplete_data, in->incomplete_data_len);
         //如果是第一次读取数据，并且不是HTTP请求的，关闭连接。复制数据失败的也关闭连接
         if (in->reread_data == 0 || copy_data(in) != 0)
         {
@@ -464,13 +421,10 @@ void tcp_in(conn_t *in)
         }
         goto handle_data_complete;
     }
-    headerEnd = strstr(in->incomplete_data, "\n\r\n");
+    headerEnd = strstr(in->incomplete_data, "\n\r");
     //请求头不完整，等待下次读取
     if (headerEnd == NULL)
         return;
-    headerEnd += 3;
-    if (encodeCode)
-        dataEncode(headerEnd, in->incomplete_data_len - (headerEnd - in->incomplete_data));
     host = get_host(in->incomplete_data);
     if (host == NULL)
     {
@@ -491,12 +445,13 @@ void tcp_in(conn_t *in)
         {
             server->is_ssl = in->is_ssl = 1;
             /* 这时候即使fd是非阻塞也只需要判断返回值是否小于0 */
-            if (write(in->fd, ssl_rsp, sizeof(ssl_rsp) - 1) < 0)
+            if (write(in->fd, SSL_RSP, sizeof(SSL_RSP)-1) < 0)
             {
                 free(host);
                 close_connection(in);
                 return;
             }
+            headerEnd += 3;
             if (headerEnd - in->incomplete_data < in->incomplete_data_len)
             {
                 in->incomplete_data_len -= headerEnd - in->incomplete_data;
@@ -506,16 +461,6 @@ void tcp_in(conn_t *in)
                     copy_data(in);
                     free(host);
                     return;
-                }
-                else
-                {
-                    //如果是CONNECT代理HTTP,需要重新获取host
-                    char *save_host = host;
-                    host = get_host(in->incomplete_data);
-                    if (!host)
-                        host = save_host;
-                    else
-                        free(save_host);
                 }
             }
             else
@@ -547,8 +492,6 @@ void *accept_loop(void *ptr)
     struct epoll_event epollEvent;
     conn_t *client;
     
-    if (encodeCode)
-        dataEncode(ssl_rsp, sizeof(ssl_rsp) - 1);
     epollEvent.events = EPOLLIN|EPOLLET;
     while (1)
     {
