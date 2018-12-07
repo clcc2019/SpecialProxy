@@ -27,7 +27,6 @@ SpecialProxy
     -d DNS查询IP[:端口]     默认为 "114.114.114.114"  
     -s SSL代理字符串        默认为 "CONNECT"  
     -u 设置uid
-    -e 设置代理CProxy的数据编码代码(1-127)
     -a                      对所有HTTP请求重新拼接  
     -h 显示帮助  
     -w 工作进程数  
