@@ -9,7 +9,16 @@
 conn_t cts[MAX_CONNECTION];
 char *local_header, *proxy_header, *ssl_proxy;
 int lisFd, proxy_header_len, local_header_len;
-uint8_t strict_spilce;
+uint8_t strict_spilce, sslEncodeCode;
+
+/* 对数据进行编码 */
+static void dataEncode(char *data, int data_len)
+{
+    if (sslEncodeCode == 0)
+        return;
+    while (data_len-- > 0)
+        data[data_len] ^= sslEncodeCode;
+}
 
 int8_t connectionToServer(char *ip, conn_t *server)
 {
@@ -22,7 +31,7 @@ int8_t connectionToServer(char *ip, conn_t *server)
     if (connect(server->fd, (struct sockaddr *)&addr, sizeof(addr)) != 0 && errno != EINPROGRESS)
         return 1;
     ev.data.ptr = server;
-    ev.events = EPOLLIN|EPOLLOUT|EPOLLERR|EPOLLHUP|EPOLLET;
+    ev.events = EPOLLIN|EPOLLOUT|EPOLLET;
     epoll_ctl(efd, EPOLL_CTL_ADD, server->fd, &ev);
 
     return 0;
@@ -249,7 +258,7 @@ static char *build_request(char *client_data, int *data_len, char *host)
 }
 
 /* 解析Host */
-int8_t parse_host(conn_t *server, char *host)
+static int8_t parse_host(conn_t *server, char *host)
 {
     char *port, *p;
 
@@ -278,6 +287,7 @@ int8_t parse_host(conn_t *server, char *host)
 /* 读取到的数据全部就绪，将incomplete_data复制到ready_data */
 static int8_t copy_data(conn_t *ct)
 {
+    dataEncode(ct->incomplete_data, ct->incomplete_data_len);
     if (ct->ready_data)
     {
         char *new_data;
@@ -306,14 +316,14 @@ static void serverToClient(conn_t *server)
     conn_t *client;
     int write_len;
 
-    errno = 0;
     client = server - 1;
     while ((server->ready_data_len = read(server->fd, server->ready_data, BUFFER_SIZE)) > 0)
     {
+        dataEncode(server->ready_data, server->ready_data_len);
         write_len = write(client->fd, server->ready_data, server->ready_data_len);
-        if (write_len == -1)
+        if (write_len <= 0)
         {
-            if (errno != EAGAIN)
+            if (write_len == 0 || errno != EAGAIN)
                 close_connection(server);
             else
                 server->sent_len = 0;
@@ -322,7 +332,7 @@ static void serverToClient(conn_t *server)
         else if (write_len < server->ready_data_len)
         {
             server->sent_len = write_len;
-            ev.events = EPOLLIN|EPOLLOUT|EPOLLERR|EPOLLHUP|EPOLLET;
+            ev.events = EPOLLIN|EPOLLOUT|EPOLLET;
             ev.data.ptr = client;
             epoll_ctl(efd, EPOLL_CTL_MOD, client->fd, &ev);
             return;
@@ -331,7 +341,7 @@ static void serverToClient(conn_t *server)
             break;
     }
     //判断是否关闭连接
-    if (server->ready_data_len == 0 || (errno != EAGAIN && errno != 0))
+    if (server->ready_data_len == 0 || (server->ready_data_len == -1 && errno != EAGAIN))
         close_connection(server);
     else
         server->ready_data_len = server->sent_len = 0;
@@ -358,14 +368,14 @@ void tcp_out(conn_t *to)
             serverToClient(from);
             if (from->fd >= 0 && from->ready_data_len == 0)
             {
-                ev.events = EPOLLIN|EPOLLERR|EPOLLHUP|EPOLLET;
+                ev.events = EPOLLIN|EPOLLET;
                 ev.data.ptr = to;
                 epoll_ctl(efd, EPOLL_CTL_MOD, to->fd, &ev);
             }
         }
         else
         {
-            ev.events = EPOLLIN|EPOLLERR|EPOLLHUP|EPOLLET;
+            ev.events = EPOLLIN|EPOLLET;
             ev.data.ptr = to;
             epoll_ctl(efd, EPOLL_CTL_MOD, to->fd, &ev);
             free(from->ready_data);
@@ -376,7 +386,7 @@ void tcp_out(conn_t *to)
     else if (write_len > 0)
     {
         from->sent_len += write_len;
-        ev.events = EPOLLIN|EPOLLOUT|EPOLLERR|EPOLLHUP|EPOLLET;
+        ev.events = EPOLLIN|EPOLLOUT|EPOLLET;
         ev.data.ptr = to;
         epoll_ctl(efd, EPOLL_CTL_MOD, to->fd, &ev);
     }
@@ -397,7 +407,7 @@ void tcp_in(conn_t *in)
     if ((in - cts) & 1)
     {
         in->last_event_time = (in-1)->last_event_time = time(NULL);
-        if (in->ready_data_len == 0)
+        if (in->ready_data_len <= 0)
             serverToClient(in);
         return;
     }
@@ -431,6 +441,7 @@ void tcp_in(conn_t *in)
         close_connection(in);
         return;
     }
+    dataEncode(host, strlen(host));
     /* 第一次读取数据 */
     if (in->reread_data == 0)
     {
@@ -487,30 +498,25 @@ void tcp_in(conn_t *in)
         tcp_out(server);
 }
 
-void *accept_loop(void *ptr)
+void accept_client()
 {
     struct epoll_event epollEvent;
     conn_t *client;
     
+    /* 偶数为客户端，奇数为服务端 */
+    for (client = cts; client - cts < MAX_CONNECTION; client += 2)
+        if (client->fd < 0)
+            break;
+    if (client - cts >= MAX_CONNECTION)
+        return;
+    client->last_event_time = (client+1)->last_event_time = time(NULL);
+    client->fd = accept(lisFd, (struct sockaddr *)&addr, &addr_len);
+    if (client->fd < 0)
+        return;
+    fcntl(client->fd, F_SETFL, O_NONBLOCK);
     epollEvent.events = EPOLLIN|EPOLLET;
-    while (1)
-    {
-        /* 偶数为客户端，奇数为服务端 */
-        for (client = cts; client - cts < MAX_CONNECTION; client += 2)
-            if (client->fd < 0)
-                break;
-        if (client - cts >= MAX_CONNECTION)
-        {
-            sleep(3);
-            continue;
-        }
-        while ((client->fd = accept(lisFd, (struct sockaddr *)&addr, &addr_len)) < 0);
-        fcntl(client->fd, F_SETFL, O_NONBLOCK);
-        epollEvent.data.ptr = client;
-        epoll_ctl(efd, EPOLL_CTL_ADD, client->fd, &epollEvent);
-    }
-    
-    return NULL;
+    epollEvent.data.ptr = client;
+    epoll_ctl(efd, EPOLL_CTL_ADD, client->fd, &epollEvent);
 }
 
 void create_listen(char *ip, int port)

@@ -4,7 +4,7 @@
 #include "dns.h"
 #include <pthread.h>
 
-#define VERSION "0.2"
+#define VERSION "0.3"
 #define DEFAULT_DNS_IP "114.114.114.114"
 
 struct epoll_event evs[MAX_CONNECTION + 1], ev;
@@ -22,6 +22,7 @@ static void usage()
     "    -s ssl proxy string                   \033[35G default is 'CONNECT'\n"
     "    -t timeout                                  \033[35G default is 35s\n"
     "    -u uid                   \033[35G running uid\n"
+    "    -e ssl data encode code         \033[35G default is 0\n"
     "    -a                                    \033[35G all http requests repeat spilce\n"
     "    -h display this infomaction\n"
     "    -w worker process\n");
@@ -30,20 +31,26 @@ static void usage()
 
 static void server_loop()
 {
-    pthread_t thread_id;
+    pthread_t thId;
     int n;
 
-    //单独进程accept多进程并发环境下不会惊群
-    pthread_create(&thread_id, NULL, accept_loop, NULL);
-    ev.events = EPOLLIN;
+    ev.events = EPOLLIN|EPOLLET;
     ev.data.fd = dnsFd;
     epoll_ctl(efd, EPOLL_CTL_ADD, dnsFd, &ev);
+    ev.events = EPOLLIN;
+    ev.data.fd = lisFd;
+    epoll_ctl(efd, EPOLL_CTL_ADD, lisFd, &ev);
+    pthread_create(&thId, NULL, &close_timeout_connectionLoop, NULL);
     while (1)
     {
         n = epoll_wait(efd, evs, MAX_CONNECTION + 1, -1);
         while (n-- > 0)
         {
-            if (evs[n].data.fd == dnsFd)
+            if (evs[n].data.fd == lisFd)
+            {
+                accept_client();
+            }
+            else if (evs[n].data.fd == dnsFd)
             {
                 if (evs[n].events & EPOLLIN)
                     read_dns_rsp();
@@ -52,11 +59,6 @@ static void server_loop()
             }
             else
             {
-                if ((evs[n].events & EPOLLERR) || (evs[n].events & EPOLLHUP))
-                {
-                    if (((conn_t *)evs[n].data.ptr)->fd >= 0)
-                        close_connection((conn_t *)evs[n].data.ptr);
-                }
                 if (evs[n].events & EPOLLIN)
                     tcp_in((conn_t *)evs[n].data.ptr);
                 if (evs[n].events & EPOLLOUT)
@@ -81,7 +83,8 @@ static void initializate(int argc, char **argv)
     dnsAddr.sin_addr.s_addr = inet_addr(DEFAULT_DNS_IP);
     dnsAddr.sin_port = htons(53);
     dns_connect(&dnsAddr);  //主进程中的fd
-    strict_spilce = timeout_seconds = 0;
+    timeout_seconds = DEFAULT_TIMEOUT;
+    strict_spilce = sslEncodeCode = 0;
     local_header = NULL;
     ssl_proxy = (char *)"CONNECT";
     local_header = (char *)"\nLocal:";
@@ -89,7 +92,7 @@ static void initializate(int argc, char **argv)
     proxy_header_len = strlen(proxy_header);
     local_header_len = strlen(local_header);
     /* 处理命令行参数 */
-    while ((opt = getopt(argc, argv, "d:l:p:s:w:t:u:L:ah")) != -1)
+    while ((opt = getopt(argc, argv, "d:l:p:s:e:w:t:u:L:ah")) != -1)
     {
         switch (opt)
         {
@@ -148,12 +151,16 @@ static void initializate(int argc, char **argv)
                 ssl_proxy = optarg;
             break;
             
+            case 'e':
+                sslEncodeCode = atoi(optarg);
+            break;
+            
             case 'a':
                 strict_spilce = 1;
             break;
             
             case 't':
-                timeout_seconds = (unsigned int)atoi(optarg);
+                timeout_seconds = (time_t)atoi(optarg);
             break;
             
             case 'w':
