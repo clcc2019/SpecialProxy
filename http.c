@@ -2,31 +2,33 @@
 #include "dns.h"
 #include "timeout.h"
 
-#define SSL_RSP "HTTP/1.1 200 Connection established\r\n\r\n"
+#define SSL_RSP "HTTP/1.1 200 Connection established\r\nVia: SpecialProxy_CuteBi\r\n\r\n"
 #define HTTP_TYPE 0
 #define OTHER_TYPE 1
 
 conn_t cts[MAX_CONNECTION];
 char *local_header, *proxy_header, *ssl_proxy;
-int lisFd, proxy_header_len, local_header_len;
+int lisFd, proxy_header_len, local_header_len, ignore_host_before_count;
 uint8_t strict_spilce, sslEncodeCode;
 
 /* 对数据进行编码 */
 static void dataEncode(char *data, int data_len)
 {
-    if (sslEncodeCode == 0)
-        return;
-    while (data_len-- > 0)
-        data[data_len] ^= sslEncodeCode;
+    if (sslEncodeCode)
+        while (data_len-- > 0)
+            data[data_len] ^= sslEncodeCode;
 }
 
-int8_t connectionToServer(char *ip, conn_t *server)
+int8_t connectionToServer(in_addr_t ip, conn_t *server)
 {
+    struct sockaddr_in addr;
+
     server->fd = socket(AF_INET, SOCK_STREAM, 0);
     if (server->fd < 0)
         return 1;
     fcntl(server->fd, F_SETFL, O_NONBLOCK);
-    addr.sin_addr.s_addr = inet_addr(ip);
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = ip;
     addr.sin_port = htons(server->destPort);
     if (connect(server->fd, (struct sockaddr *)&addr, sizeof(addr)) != 0 && errno != EINPROGRESS)
         return 1;
@@ -114,21 +116,22 @@ static char *read_data(conn_t *in, char *data, int *data_len)
         *data_len += read_len;
     } while (read_len == BUFFER_SIZE);
     *(data + *data_len) = '\0';
-   
+
    return data;
 }
 
 static char *get_host(char *data)
 {
     char *hostEnd, *host;
+    int i;
 
     host = strstr(data, local_header);
     if (host != NULL)
     {
         char *local_host;
-        
+
         host += local_header_len;
-        while (*host == ' ')
+        while (*host == ' ' || *host == '\t')
             host++;
         for (hostEnd = host; *hostEnd < 58 && *hostEnd > 48; hostEnd++);
         //判断该头域是否正确使用
@@ -146,29 +149,25 @@ static char *get_host(char *data)
     if (host == NULL)
         return NULL;
     host += proxy_header_len;
-    while (*host == ' ')
+    while (*host == ' ' || *host == '\t')
         host++;
+    for (i = 0; i < ignore_host_before_count; i++)
+        if (host[i] == '\0')  //防止越界
+            break;
+    host += i;
     hostEnd = strchr(host, '\r');
-    if (hostEnd)
-        return strndup(host, hostEnd - host);
-    else
-        return strdup(host);
+    return hostEnd ? strndup(host, hostEnd - host) : strdup(host);
 }
 
 /* 删除请求头中的头域 */
 static void del_hdr(char *header, int *header_len)
 {
-    char *key_end, *line_begin, *line_end;
-    int key_len;
+    char *line_begin, *line_end;
 
     for (line_begin = strchr(header, '\n'); line_begin++ && *line_begin != '\r'; line_begin = line_end)
     {
-        key_end = strchr(line_begin, ':');
-        if (key_end == NULL)
-            return;
-        key_len = key_end - line_begin;
-        line_end = strchr(key_end, '\n');
-        if (strncasecmp(line_begin, "host", key_len) == 0 || strncmp(line_begin, local_header + 1, key_len) == 0 || strncmp(line_begin, proxy_header + 1, key_len) == 0)
+        line_end = strchr(line_begin, '\n');
+        if (strncasecmp(line_begin, "host:", 5) == 0 || strncasecmp(line_begin, local_header + 1, local_header_len - 1) == 0 || strncasecmp(line_begin, proxy_header + 1, proxy_header_len - 1) == 0)
         {
             if (line_end++)
             {
@@ -273,14 +272,14 @@ static int8_t parse_host(conn_t *server, char *host)
     for (p = host; (*p > 47 && *p < 58) || *p == '.'; p++);
     if (*p == '\0')
     {
-        if (connectionToServer(host, server) != 0)
+        if (connectionToServer(inet_addr(host), server) != 0)
             return 1;
     }
     else if (build_dns_req(dns_list + ((server - cts) >> 1), host) == -1)
         return 1;
     if (port)
         *port = ':';
-    
+
     return 0;
 }
 
@@ -291,7 +290,7 @@ static int8_t copy_data(conn_t *ct)
     if (ct->ready_data)
     {
         char *new_data;
-        
+
         new_data = (char *)realloc(ct->ready_data, ct->ready_data_len + ct->incomplete_data_len);
         if (new_data == NULL)
             return 1;
@@ -358,7 +357,7 @@ void tcp_out(conn_t *to)
         from = to - 1;
     else
         from = to + 1;
-    from->last_event_time = to->last_event_time = time(NULL);
+    from->timer = to->timer = 0;
     write_len = write(to->fd, from->ready_data + from->sent_len, from->ready_data_len - from->sent_len);
     if (write_len == from->ready_data_len - from->sent_len)
     {
@@ -400,19 +399,19 @@ void tcp_in(conn_t *in)
 {
     conn_t *server;
     char *host, *headerEnd;
-    
+
     if (in->fd < 0)
         return;
     //如果in - cts是奇数，那么是服务端触发事件
     if ((in - cts) & 1)
     {
-        in->last_event_time = (in-1)->last_event_time = time(NULL);
+        in->timer = (in-1)->timer = 0;
         if (in->ready_data_len <= 0)
             serverToClient(in);
         return;
     }
-    
-    in->last_event_time = (in+1)->last_event_time = time(NULL);
+
+    in->timer = (in+1)->timer = 0;
     in->incomplete_data = read_data(in, in->incomplete_data, &in->incomplete_data_len);
     if (in->incomplete_data == NULL)
     {
@@ -501,15 +500,17 @@ void tcp_in(conn_t *in)
 void accept_client()
 {
     struct epoll_event epollEvent;
+    struct sockaddr_in addr;
     conn_t *client;
-    
+    socklen_t addr_len = sizeof(addr);
+
     /* 偶数为客户端，奇数为服务端 */
     for (client = cts; client - cts < MAX_CONNECTION; client += 2)
         if (client->fd < 0)
             break;
     if (client - cts >= MAX_CONNECTION)
         return;
-    client->last_event_time = (client+1)->last_event_time = time(NULL);
+    client->timer = (client+1)->timer = 0;
     client->fd = accept(lisFd, (struct sockaddr *)&addr, &addr_len);
     if (client->fd < 0)
         return;
@@ -521,6 +522,7 @@ void accept_client()
 
 void create_listen(char *ip, int port)
 {
+    struct sockaddr_in addr;
     int optval = 1;
 
     if ((lisFd = socket(AF_INET, SOCK_STREAM, 0)) < 0)
@@ -528,6 +530,7 @@ void create_listen(char *ip, int port)
         perror("socket");
         exit(1);
     }
+    addr.sin_family = AF_INET;
     addr.sin_port = htons(port);
     addr.sin_addr.s_addr = inet_addr(ip);
     if (setsockopt(lisFd, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval)) < 0)
@@ -546,6 +549,3 @@ void create_listen(char *ip, int port)
         exit(1);
     }
 }
-
-
-

@@ -1,8 +1,7 @@
 #include "main.h"
 #include "http.h"
-#include "time.h"
 
-int timeout_seconds;
+int timeout_minute;
 
 void *close_timeout_connectionLoop(void *nullPtr)
 {
@@ -10,9 +9,14 @@ void *close_timeout_connectionLoop(void *nullPtr)
 
     while (1)
     {
-        sleep(1);
+        sleep(60);
         for (i = 0; i < MAX_CONNECTION; i += 2)
-            if (cts[i].fd > -1&& (int)(time(NULL) - cts[i].last_event_time) >= timeout_seconds)
-                close_connection(cts + i);
+            if (cts[i].fd > -1)
+            {
+                if (cts[i].timer >= timeout_minute)
+                    close_connection(cts + i);
+                else
+                    cts[i].timer = 0;
+            }
     }
 }

@@ -4,12 +4,10 @@
 #include "dns.h"
 #include <pthread.h>
 
-#define VERSION "0.3"
+#define VERSION "0.4"
 #define DEFAULT_DNS_IP "114.114.114.114"
 
 struct epoll_event evs[MAX_CONNECTION + 1], ev;
-struct sockaddr_in addr;
-socklen_t addr_len;
 int efd;
 
 static void usage()
@@ -20,9 +18,10 @@ static void usage()
     "    -L local proxy header                 \033[35G default is 'Local'\n"
     "    -d dns query address                  \033[35G default is " DEFAULT_DNS_IP "\n"
     "    -s ssl proxy string                   \033[35G default is 'CONNECT'\n"
-    "    -t timeout                                  \033[35G default is 35s\n"
-    "    -u uid                   \033[35G running uid\n"
-    "    -e ssl data encode code         \033[35G default is 0\n"
+    "    -t timeout  minute                    \033[35G default is no timeout\n"
+    "    -u uid                                \033[35G running uid\n"
+    "    -e ssl data encode code(128-255)               \033[35G default is 0\n"
+    "    -i ignore host before string count    \033[35G default is 0\n"
     "    -a                                    \033[35G all http requests repeat spilce\n"
     "    -h display this infomaction\n"
     "    -w worker process\n");
@@ -40,7 +39,8 @@ static void server_loop()
     ev.events = EPOLLIN;
     ev.data.fd = lisFd;
     epoll_ctl(efd, EPOLL_CTL_ADD, lisFd, &ev);
-    pthread_create(&thId, NULL, &close_timeout_connectionLoop, NULL);
+    if (timeout_minute)
+        pthread_create(&thId, NULL, &close_timeout_connectionLoop, NULL);
     while (1)
     {
         n = epoll_wait(efd, evs, MAX_CONNECTION + 1, -1);
@@ -73,18 +73,16 @@ static void initializate(int argc, char **argv)
     struct sockaddr_in dnsAddr;
     char *p;
     int opt, i, workers;
-    
-	/* 初始化部分变量值 */
-    addr_len = sizeof(addr);
+
+   /* 初始化部分变量值 */
     lisFd = -1;
     workers = 1;
-    dnsAddr.sin_family = addr.sin_family = AF_INET;
+    dnsAddr.sin_family = AF_INET;
     //默认dns地址
     dnsAddr.sin_addr.s_addr = inet_addr(DEFAULT_DNS_IP);
     dnsAddr.sin_port = htons(53);
     dns_connect(&dnsAddr);  //主进程中的fd
-    timeout_seconds = DEFAULT_TIMEOUT;
-    strict_spilce = sslEncodeCode = 0;
+    ignore_host_before_count = timeout_minute = strict_spilce = sslEncodeCode = 0;
     local_header = NULL;
     ssl_proxy = (char *)"CONNECT";
     local_header = (char *)"\nLocal:";
@@ -92,7 +90,7 @@ static void initializate(int argc, char **argv)
     proxy_header_len = strlen(proxy_header);
     local_header_len = strlen(local_header);
     /* 处理命令行参数 */
-    while ((opt = getopt(argc, argv, "d:l:p:s:e:w:t:u:L:ah")) != -1)
+    while ((opt = getopt(argc, argv, "d:l:p:s:e:i:w:t:u:L:ah")) != -1)
     {
         switch (opt)
         {
@@ -106,7 +104,7 @@ static void initializate(int argc, char **argv)
                 dnsAddr.sin_addr.s_addr = inet_addr(optarg);
                 connect(dnsFd, (struct sockaddr *)&dnsAddr, sizeof(dnsAddr));
             break;
-            
+
             case 'l':
                 p = strchr(optarg, ':');
                 if (p)
@@ -119,7 +117,7 @@ static void initializate(int argc, char **argv)
                     create_listen((char *)"0.0.0.0", atoi(optarg));
                 }
             break;
-            
+
             case 'p':
                 //假如选项值为 "Proxy", proxy_header设置为 "\nProxy:"
                 proxy_header_len = strlen(optarg) + 2;
@@ -133,7 +131,7 @@ static void initializate(int argc, char **argv)
                 }
                 sprintf(proxy_header, "\n%s:", optarg);
             break;
-            
+
             case 'L':
                 local_header_len = strlen(optarg) + 2;
                 if (optarg[local_header_len] == ':')
@@ -146,27 +144,31 @@ static void initializate(int argc, char **argv)
                 }
                 sprintf(local_header, "\n%s:", optarg);
             break;
-            
+
             case 's':
                 ssl_proxy = optarg;
             break;
-            
+
             case 'e':
                 sslEncodeCode = atoi(optarg);
             break;
-            
+
+            case 'i':
+                ignore_host_before_count = atoi(optarg);
+            break;
+
             case 'a':
                 strict_spilce = 1;
             break;
-            
+
             case 't':
-                timeout_seconds = (time_t)atoi(optarg);
+                timeout_minute = (time_t)atoi(optarg);
             break;
-            
+
             case 'w':
                 workers = atoi(optarg);
             break;
-            
+
             case 'u':
                 if (setgid(atoi(optarg)) != 0)
                 {
@@ -179,13 +181,13 @@ static void initializate(int argc, char **argv)
                     exit(1);
                 }
             break;
-            
+
             default:
                 usage();
             break;
         }
     }
-	/* 初始化剩下的变量值 */
+   /* 初始化的变量值 */
     if (lisFd < 0)
     {
         fputs("no listen address\n", stderr);
@@ -204,9 +206,9 @@ static void initializate(int argc, char **argv)
             exit(1);
         }
     }
-	//设置dns请求头首部
+   //设置dns请求头首部
     memset(dns_list, 0, sizeof(dns_list));
-    for (i = MAX_CONNECTION / 2; i--; )
+    for (i = MAX_CONNECTION >> 1; i--; )
     {
         memcpy(dns_list[i].request, &i, sizeof(uint16_t));
         dns_list[i].request[2] = 1;
@@ -242,6 +244,6 @@ int main(int argc, char **argv)
         return 1;
     }
     server_loop();
-    
+
     return 0;
 }
