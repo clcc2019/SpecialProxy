@@ -16,7 +16,7 @@ void *close_timeout_connectionLoop(void *nullPtr)
                 if (cts[i].timer >= timeout_minute)
                     close_connection(cts + i);
                 else
-                    cts[i].timer = 0;
+                    cts[i].timer++;
             }
     }
 }
